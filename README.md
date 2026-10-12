@@ -6,7 +6,7 @@ Microservicio de citas de la sucursal virtual del proyecto Kenko. Permite consul
 
 - [x] **Fase 1**: estructura, configuración, logging, errores, `/health`, Docker.
 - [x] **Fase 2**: modelos, migraciones Alembic, repositorios y seeds.
-- [ ] **Fase 3**: catálogo, API de citas, validación JWT, pruebas (incluida concurrencia).
+- [x] **Fase 3**: catálogo, API de citas, validación JWT, pruebas (incluida concurrencia). Eventos con `FakePublisher` (fase 4 lo sustituye por EventBridge).
 - [ ] **Fase 4**: adaptador EventBridge (AWS real), `docs/events.md`.
 - [ ] **Fase 5**: Terraform en `infra/terraform/`.
 
@@ -37,6 +37,48 @@ curl -s http://localhost:8000/api/v1/health
 ```
 
 Documentación interactiva (solo en desarrollo): `http://localhost:8000/api/v1/docs`.
+
+## API
+
+Prefijo `/api/v1`. Todo requiere `Authorization: Bearer <JWT>` excepto `/health`. El paciente se identifica **solo** por el claim `sub` del token; nunca se acepta un `userId` en el body ni en los parámetros.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/health` | Proceso y base de datos. Sin autenticación. |
+| GET | `/catalog/medical-centers` | Centros médicos. |
+| GET | `/catalog/physicians?specialty=&medical_center_id=` | Médicos, filtrables por tipo o sede (principal o secundaria). |
+| GET | `/catalog/appointment-types` | `GENERAL`, `ODONTOLOGIA`, `PSICOLOGIA`. |
+| GET | `/appointments/available?type=&medical_center_id=&physician_id=&date_from=&date_to=&page=&page_size=` | Citas libres, futuras y dentro de la ventana de agendamiento. |
+| GET | `/appointments/me?include_past=false&page=&page_size=` | Mis citas. Por defecto solo futuras. |
+| POST | `/appointments/{id}/schedule` | Agenda una cita libre. |
+| POST | `/appointments/{id}/cancel` | Cancela una cita propia. |
+| POST | `/appointments/{id}/reschedule` | Body `{"newAppointmentId": "..."}`. Cambia atómicamente la cita propia por otra libre. |
+
+Parámetros de consulta en `snake_case`; JSON de entrada y salida en `camelCase`. Horas en formato `HH:MM`.
+
+**Paginación:** `page` (≥1, por defecto 1) y `page_size` (1 a 100, por defecto 20). Respuesta: `{"items", "page", "pageSize", "total"}`. Orden: fecha, hora, `appointmentId`.
+
+**Respuesta de reagendar:** `{"previousAppointment": {...}, "appointment": {...}}`.
+
+**Errores:** `401` token ausente o inválido; `403` cita de otro usuario; `404` cita inexistente; `409` cita ya tomada; `422` regla de negocio o validación (`code` = `business_rule_violation` o `validation_error`).
+
+**Reglas** (configurables por entorno):
+- Agendar: la cita debe ser futura (inicio posterior a ahora) y dentro de `MAX_DAYS_AHEAD_TO_SCHEDULE` días.
+- Cancelar y reagendar la cita actual: al menos `MIN_HOURS_BEFORE_CANCEL_OR_RESCHEDULE` horas antes del inicio.
+- Reagendar: la nueva cita debe ser del mismo tipo, estar libre, ser futura y cumplir la ventana de agendamiento. Si la nueva ya no está libre, responde `409` y la cita actual no cambia.
+- Las horas se evalúan en `America/Bogota`.
+
+**Concurrencia:** agendar usa `UPDATE ... WHERE user_id IS NULL`; reagendar bloquea ambas filas en orden de `appointment_id`. Un solo ganador por cita; los demás reciben `409`.
+
+**Eventos:** `AppointmentScheduled`, `AppointmentRescheduled` y `AppointmentCancelled` se publican solo después del commit, con reintentos acotados (3 intentos, backoff 0.2 s y 0.4 s). Si todos fallan se registra el error y la operación se mantiene. Esto se sustituye por Transactional Outbox si el volumen o la criticidad lo requieren (ver `docs/events.md` en la fase 4).
+
+**Probar la API con un token de desarrollo** (usa `JWT_SECRET` de tu `.env`):
+
+```bash
+TOKEN=$(docker compose run --rm appointments-api python -c \
+  "import jwt,os,time,uuid; print(jwt.encode({'sub': str(uuid.uuid4()), 'exp': int(time.time())+3600}, os.environ['JWT_SECRET'], algorithm='HS256'))")
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/appointments/available?page_size=2"
+```
 
 ## Base de datos
 
@@ -94,8 +136,9 @@ Las credenciales de AWS nunca van en el repositorio ni en `.env`: en AWS real se
 ## Decisiones
 
 - **Zona horaria**: fechas y horas de las citas (`date`, `start_time`, `end_time`) se interpretan en `America/Bogota`. Los timestamps de eventos (`occurredAt`, `scheduledAt`, etc.) van en UTC con sufijo `Z`.
-- **Citas pasadas**: no hay estados ni procesos automáticos. Una cita es pasada si su fin (`date` + `end_time` en `America/Bogota`) ya ocurrió; se calcula en las consultas. Ningún proceso la marca como completada o fallida.
+- **Citas pasadas**: no hay estados ni procesos automáticos. Una cita es futura si su inicio (`date` + `start_time` en `America/Bogota`) aún no ha llegado; se calcula en las consultas. Ningún proceso la marca como completada o fallida.
 - **Errores**: formato uniforme `{"error": {"code", "message", "correlationId", "details"?}}`.
+- **Cancelar cita de otro usuario**: `403` (no `404`), para que el mensaje sea claro al usuario autenticado. Los IDs son UUID v4/v7, así que no son adivinables.
 - **Correlation ID**: se toma del header `X-Correlation-Id` si es un UUID válido; si no, se genera (UUID v7). Se devuelve en la respuesta y aparece en todos los logs.
 - **Logs**: JSON en stdout con `correlationId`, `eventId` y `userId` cuando aplique, sin datos sensibles innecesarios.
 - **Health**: `GET /api/v1/health` no requiere autenticación. Responde `503` si la base de datos no responde.
@@ -103,6 +146,7 @@ Las credenciales de AWS nunca van en el repositorio ni en `.env`: en AWS real se
 
 ## TODO
 
-- **JWT** (pendiente con el equipo de Authentication): confirmar el algoritmo, el emisor (`iss`), la audiencia (`aud`) y si el `sub` es el UUID del usuario. Hasta entonces solo se usa el claim `sub` como `userId`; no se inventan más claims.
+- **JWT** (pendiente con el equipo de Authentication): confirmar si `iss` y `aud` son obligatorios. Hoy solo se validan si se configuran `JWT_ISSUER` o `JWT_AUDIENCE`. Se exige `sub` (UUID) y se valida `exp` si viene. No se inventan más claims.
+- **Pruebas de servicios**: las pruebas de agendar, cancelar y reagendar son de integración contra PostgreSQL real, porque la atomicidad (locks y UPDATE condicional) no se puede validar con mocks ni con SQLite.
 - **Eventos**: nombres de colas y reglas, y contrato definitivo con Notifications y Profile, según lo acordado con el equipo.
 - **Paginación y formato de `/appointments/me`** (`include_past`): se implementan en la fase 3.
