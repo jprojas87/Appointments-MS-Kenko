@@ -1,0 +1,23 @@
+# Secretos y configuración local
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Herramientas
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Terraform (fase 5)
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Sistema
+.DS_Store

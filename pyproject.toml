@@ -1,0 +1,19 @@
+[project]
+name = "appointments-service"
+version = "0.1.0"
+description = "Microservicio de citas de la sucursal virtual del proyecto Kenko"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["app"]
