@@ -16,6 +16,9 @@ RUN groupadd --system app \
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
+COPY seeds ./seeds
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

@@ -5,7 +5,7 @@ Microservicio de citas de la sucursal virtual del proyecto Kenko. Permite consul
 ## Estado de las fases
 
 - [x] **Fase 1**: estructura, configuración, logging, errores, `/health`, Docker.
-- [ ] **Fase 2**: modelos, migraciones Alembic, repositorios y seeds.
+- [x] **Fase 2**: modelos, migraciones Alembic, repositorios y seeds.
 - [ ] **Fase 3**: catálogo, API de citas, validación JWT, pruebas (incluida concurrencia).
 - [ ] **Fase 4**: adaptador EventBridge (AWS real), `docs/events.md`.
 - [ ] **Fase 5**: Terraform en `infra/terraform/`.
@@ -22,7 +22,14 @@ cp .env.example .env          # ajusta los valores si hace falta
 docker compose up --build     # levanta appointments-db y appointments-api
 ```
 
-Verificación:
+Primera vez, aplica migraciones y carga datos de prueba (ver [Base de datos](#base-de-datos)):
+
+```bash
+docker compose run --rm appointments-api alembic upgrade head
+docker compose run --rm appointments-api python -m seeds.run
+```
+
+Verificación (ajusta el puerto si cambiaste `API_HOST_PORT`):
 
 ```bash
 curl -s http://localhost:8000/api/v1/health
@@ -30,6 +37,22 @@ curl -s http://localhost:8000/api/v1/health
 ```
 
 Documentación interactiva (solo en desarrollo): `http://localhost:8000/api/v1/docs`.
+
+## Base de datos
+
+Esquema en `migrations/versions/` (Alembic). Tablas: `appointments`, `physicians`, `medical_centers` y el tipo `appointment_type` (`GENERAL`, `ODONTOLOGIA`, `PSICOLOGIA`).
+
+```bash
+docker compose run --rm appointments-api alembic upgrade head      # aplicar migraciones
+docker compose run --rm appointments-api alembic downgrade -1      # revertir la última
+docker compose run --rm appointments-api alembic current           # revisión actual
+```
+
+Una cita con `user_id` nulo está disponible; con `user_id`, está agendada por ese usuario. `user_id` no tiene clave foránea porque el id llega en el JWT y no hay tabla de usuarios aquí.
+
+**Seeds** (`python -m seeds.run`): son idempotentes. Crean 5 centros médicos, 10 médicos (4 GENERAL, 3 ODONTOLOGIA, 3 PSICOLOGIA; algunos con sede secundaria) y citas de 30 minutos de lunes a viernes, en bloques 08:00–12:00 y 14:00–17:00, para los 60 días siguientes a hoy (zona America/Bogota). Cada médico atiende un día por semana, así que no hay solapamientos. Los IDs son UUID v5 deterministas. Una segunda ejecución no inserta nada ni modifica citas reservadas.
+
+Pruebas de integración usan una base aparte `appointments_test` que el propio test crea y migra; no tocan los datos de desarrollo.
 
 Para detener: `docker compose down` (la BD conserva sus datos en el volumen `appointments-db-data`; usa `docker compose down -v` para borrarlos).
 
