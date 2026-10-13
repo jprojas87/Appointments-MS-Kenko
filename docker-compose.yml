@@ -41,5 +41,14 @@ services:
         condition: service_healthy
     profiles: ["tools"]
 
+  appointments-uv:
+    build:
+      context: .
+      target: uv-tools
+    working_dir: /app
+    volumes:
+      - .:/app
+    profiles: ["tools"]
+
 volumes:
   appointments-db-data:

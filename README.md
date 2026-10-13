@@ -13,7 +13,7 @@ Microservicio de citas de la sucursal virtual del proyecto Kenko. Permite consul
 ## Requisitos
 
 - WSL2 (Ubuntu) con Docker y Docker Compose. El proyecto debe vivir en el sistema de archivos de WSL (`~/...`), no en `/mnt/c`.
-- Nada más se requiere en el host: Python, PostgreSQL y las herramientas de prueba viven en los contenedores.
+- Nada más se requiere en el host: Python, `uv`, PostgreSQL y las herramientas de prueba viven en los contenedores.
 
 ## Puesta en marcha
 
@@ -110,7 +110,25 @@ docker compose --profile tools run --rm appointments-tests ruff format --check .
 
 Las pruebas de integración requieren `appointments-db` sano; el servicio de pruebas lo espera automáticamente.
 
-Para ejecutar uvicorn directamente en WSL (fuera de Docker), instala `requirements-dev.txt` en un venv, cambia `DATABASE_URL` a `@localhost:5433` y ejecuta `uvicorn app.main:create_app --factory --reload`.
+## Dependencias y uv
+
+`pyproject.toml` es la fuente de verdad de las dependencias y `uv.lock` fija las versiones directas y transitivas. La versión de uv se fija en `0.13.0` en el Dockerfile; solo se usa durante build y para mantener el lock, no se incluye en la imagen runtime. No se requiere instalar uv ni Python en WSL.
+
+Las imágenes de producción y de pruebas instalan dependencias con el lock en modo estricto (`uv sync --locked`). Para actualizar/verificar el lockfile, el contenedor `appointments-uv` del perfil `tools` monta el repo. Ejecútalo como tu UID para que los archivos del host conserven el propietario correcto:
+
+```bash
+docker compose --profile tools run --rm --user "$(id -u):$(id -g)" appointments-uv lock
+docker compose --profile tools run --rm --user "$(id -u):$(id -g)" appointments-uv lock --check
+```
+
+Después de cambiar dependencias, reconstruye y valida las imágenes:
+
+```bash
+docker compose --profile tools build appointments-api appointments-tests
+docker compose --profile tools run --rm appointments-tests pytest
+docker compose --profile tools run --rm appointments-tests ruff check .
+docker compose --profile tools run --rm appointments-tests ruff format --check .
+```
 
 ## Variables de entorno
 
