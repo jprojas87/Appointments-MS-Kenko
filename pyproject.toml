@@ -2,7 +2,32 @@
 name = "appointments-service"
 version = "0.1.0"
 description = "Microservicio de citas de la sucursal virtual del proyecto Kenko"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.143.0",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.15.0",
+    "uvicorn==0.54.0",
+    "SQLAlchemy==2.1.4",
+    "alembic==1.20.0",
+    "psycopg[binary]==3.3.6",
+    "boto3==1.43.112",
+    "uuid-utils==1.0.0",
+    "tzdata==2026.5",
+    "PyJWT[crypto]==2.15.1",
+    "cryptography==50.0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "httpx==0.28.1",
+    "ruff==0.17.0",
+]
+
+[tool.uv]
+package = false
 
 [tool.ruff]
 line-length = 100
